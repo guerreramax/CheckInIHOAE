@@ -195,7 +195,7 @@ def populate_database(df_imported, signed_names, signed_emails):
                     f_name, l_name = b_first, b_last
                 elif i > 0 and ((f_name.lower() == b_first.lower() and l_name.lower() == b_last.lower()) or (not f_name and not l_name)):
                     f_name = f"Guest {i}"
-                    l_name = f"({buyer_full_display})" if buyer_full_display else ""
+                    l_name = primary_group_key
 
                 c_in_clean = "☑ YES" if c_in.upper() in ["YES", "Y", "TRUE", "1.0", "1", "CHECKED", "☑ YES", "☑", "✓ YES", "✓"] else "☐ NO"
 
@@ -248,7 +248,7 @@ def populate_database(df_imported, signed_names, signed_emails):
             rows.append((l_name, f_name, e_mail, t_desc, has_waiver, c_in_clean, t_in, primary_group_key, 1 if qty > 1 else 0, 0))
 
             for g in range(1, qty):
-                guest_l_name = f"{l_name} (Guest {g})" if l_name else f"Guest {g}"
+                guest_l_name = primary_group_key
                 rows.append((guest_l_name, f"Guest {g}", e_mail, t_desc, "☐ NO", "☐ NO", "", primary_group_key, 0, 1))
 
     conn = get_db()
@@ -266,7 +266,7 @@ def populate_database(df_imported, signed_names, signed_emails):
 url_line = st.query_params.get("line", "A-I")
 
 st.markdown('<p class="main-header">I ❤ OAKLAND ALAMEDA ESTUARY</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.4)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.5)</p>', unsafe_allow_html=True)
 
 sidebar = st.sidebar
 sidebar.header("⚙️ Event Control Panel")
