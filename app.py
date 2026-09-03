@@ -1,11 +1,12 @@
 import datetime
+import io
 import re
 import sqlite3
 import pandas as pd
 import streamlit as st
 
 # =============================================================================
-# 1. DATABASE & PERSISTENCE ENGINE
+# 1. DATABASE ENGINE
 # =============================================================================
 DB_FILE = "checkin_master.db"
 
@@ -51,14 +52,21 @@ st.markdown("""
 <style>
     .main-header { font-size: 26px; font-weight: bold; color: #1B4173; margin-bottom: 0px; }
     .sub-header { font-size: 14px; font-style: italic; color: #FF6F43; margin-bottom: 15px; }
-    .stButton button { border-radius: 8px; font-weight: bold; }
+    .stButton button { border-radius: 6px; font-weight: bold; }
     div[data-testid="stMetricValue"] { font-size: 22px; color: #2E67AE; }
+    .email-text { font-size: 0.85em; color: #64748B; word-break: break-all; }
 </style>
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# 3. HELPER FUNCTIONS & WAIVER PARSING
+# 3. HELPER FUNCTIONS & EXCEL CONVERTER
 # =============================================================================
+def convert_df_to_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Section_CheckIn_Roster")
+    return output.getvalue()
+
 def parse_waivers(file_obj):
     names, emails = set(), set()
     try:
@@ -135,7 +143,6 @@ def populate_database(df_imported, signed_names, signed_emails):
 
                 c_in_clean = "☑ YES" if c_in.upper() in ["YES", "Y", "TRUE", "1.0", "1", "CHECKED", "☑ YES", "☑", "✓ YES", "✓"] else "☐ NO"
 
-                # Check waiver
                 full1, full2 = f"{f_name} {l_name}".strip().lower(), f"{l_name} {f_name}".strip().lower()
                 has_waiver = "☐ NO"
                 if e_mail.lower() in signed_emails or full1 in signed_names or full2 in signed_names:
@@ -196,19 +203,17 @@ def populate_database(df_imported, signed_names, signed_emails):
     conn.close()
 
 # =============================================================================
-# 4. ROUTING & QUERY PARAMETERS
+# 4. HEADER & ROUTING PARAMETERS
 # =============================================================================
-# Read line selection from URL parameter (default to Line 1: A-I)
 url_line = st.query_params.get("line", "A-I")
 
 st.markdown('<p class="main-header">I ❤ OAKLAND ALAMEDA ESTUARY</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.1)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.3)</p>', unsafe_allow_html=True)
 
 sidebar = st.sidebar
 sidebar.header("⚙️ Event Control Panel")
 app_mode = sidebar.radio("Select Interface Mode:", ["Volunteer Check-In Line", "Morning Admin Portal"])
 
-# Alphabetical Line Groupings
 LINE_GROUPS = {
     "A-I": ['A','B','C','D','E','F','G','H','I'],
     "J-R": ['J','K','L','M','N','O','P','Q','R'],
@@ -216,12 +221,79 @@ LINE_GROUPS = {
 }
 
 # =============================================================================
-# 5. VOLUNTEER CHECK-IN INTERFACE
+# 5. CARD RENDERER FUNCTION
+# =============================================================================
+def render_attendee_card(row, tab_prefix):
+    att_id = row["id"]
+    is_checked = (row["checked_in"] == "☑ YES")
+    has_waiver = (row["completed_waiver"] == "☑ YES")
+    is_bold_primary = (row["is_primary"] == 1)
+
+    with st.container():
+        c1, c2, c3, c4, c5 = st.columns([2.5, 2.5, 1.2, 1.2, 1.2])
+        
+        name_str = f"**{row['first_name']} {row['last_name']}**" if is_bold_primary else f"{row['first_name']} {row['last_name']}"
+        c1.markdown(f"{name_str}<br><span class='email-text'>{row['email']}</span>", unsafe_allow_html=True)
+        c2.markdown(f"**Ticket:** {row['ticket_type']}")
+
+        waiver_toggle = c3.checkbox("Waiver", value=has_waiver, key=f"w_{att_id}_{tab_prefix}")
+        if waiver_toggle != has_waiver:
+            conn = get_db()
+            new_val = "☑ YES" if waiver_toggle else "☐ NO"
+            conn.execute("UPDATE attendees SET completed_waiver = ? WHERE id = ?", (new_val, att_id))
+            conn.commit()
+            conn.close()
+            st.rerun()
+
+        checkin_toggle = c4.checkbox("Check-In", value=is_checked, key=f"c_{att_id}_{tab_prefix}")
+        if checkin_toggle != is_checked:
+            conn = get_db()
+            new_val = "☑ YES" if checkin_toggle else "☐ NO"
+            now_time = datetime.datetime.now().strftime("%I:%M:%S %p") if checkin_toggle else ""
+            conn.execute("UPDATE attendees SET checked_in = ?, time_checked_in = ? WHERE id = ?", (new_val, now_time, att_id))
+            conn.commit()
+            conn.close()
+            st.rerun()
+
+        if c5.button("⚡ Both", key=f"b_{att_id}_{tab_prefix}"):
+            conn = get_db()
+            now_time = datetime.datetime.now().strftime("%I:%M:%S %p")
+            conn.execute("UPDATE attendees SET completed_waiver = '☑ YES', checked_in = '☑ YES', time_checked_in = ? WHERE id = ?", (now_time, att_id))
+            conn.commit()
+            conn.close()
+            st.rerun()
+
+        with st.expander(f"✏️ Edit Info for {row['first_name']} {row['last_name']}"):
+            with st.form(key=f"edit_form_{att_id}_{tab_prefix}"):
+                ef1, ef2 = st.columns(2)
+                new_first = ef1.text_input("First Name", value=row["first_name"])
+                new_last = ef2.text_input("Last Name", value=row["last_name"])
+                
+                ef3, ef4 = st.columns(2)
+                new_email = ef3.text_input("Email Address", value=row["email"])
+                new_ticket = ef4.text_input("Ticket Type", value=row["ticket_type"])
+                
+                if st.form_submit_button("💾 Save Registrant Updates"):
+                    conn = get_db()
+                    conn.execute("""
+                        UPDATE attendees 
+                        SET first_name = ?, last_name = ?, email = ?, ticket_type = ? 
+                        WHERE id = ?
+                    """, (new_first.strip(), new_last.strip(), new_email.strip(), new_ticket.strip(), att_id))
+                    conn.commit()
+                    conn.close()
+                    st.success("Registrant details updated successfully!")
+                    st.rerun()
+
+    st.divider()
+
+# =============================================================================
+# 6. VOLUNTEER CHECK-IN INTERFACE
 # =============================================================================
 if app_mode == "Volunteer Check-In Line":
     st.subheader("📋 Volunteer Check-In Station")
     
-    col_line, col_search = st.columns([1, 2])
+    col_line, col_search, col_save = st.columns([1.2, 2, 1])
     with col_line:
         selected_line = st.selectbox(
             "Assigned Line Section:",
@@ -230,25 +302,24 @@ if app_mode == "Volunteer Check-In Line":
         )
     with col_search:
         search_query = st.text_input("🔍 Search Registrant or Guest Name / Email:", "")
+    with col_save:
+        st.write(" ")
+        st.write(" ")
+        if st.button("💾 Save Progress", type="primary", use_container_width=True):
+            st.toast(f"✅ Line {selected_line} progress synced & saved!", icon="💾")
 
     conn = get_db()
-    
-    # Base query
     query = "SELECT id, last_name, first_name, email, ticket_type, completed_waiver, checked_in, time_checked_in, primary_name, is_primary FROM attendees"
     params = []
-
     conditions = []
     
-    # Filter by Alphabet Section
     if selected_line in LINE_GROUPS:
         letters = LINE_GROUPS[selected_line]
         letter_placeholders = ",".join(["?"] * len(letters))
-        # Match primary buyer's last name initial OR guest's last name initial
         conditions.append(f"(UPPER(SUBSTR(last_name, 1, 1)) IN ({letter_placeholders}) OR UPPER(SUBSTR(primary_name, 1, 1)) IN ({letter_placeholders}))")
         params.extend(letters)
         params.extend(letters)
 
-    # Filter by Search Query
     if search_query.strip():
         sq = f"%{search_query.strip().lower()}%"
         conditions.append("(LOWER(last_name) LIKE ? OR LOWER(first_name) LIKE ? OR LOWER(email) LIKE ? OR LOWER(primary_name) LIKE ?)")
@@ -260,10 +331,7 @@ if app_mode == "Volunteer Check-In Line":
     query += " ORDER BY primary_name ASC, is_primary DESC, id ASC"
 
     df_display = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-
-    # Metrics Summary
-    conn = get_db()
+    
     total_count = pd.read_sql_query("SELECT COUNT(*) as cnt FROM attendees", conn)["cnt"][0]
     checked_count = pd.read_sql_query("SELECT COUNT(*) as cnt FROM attendees WHERE checked_in = '☑ YES'", conn)["cnt"][0]
     conn.close()
@@ -275,61 +343,26 @@ if app_mode == "Volunteer Check-In Line":
 
     st.divider()
 
-    if df_display.empty:
-        st.info("No attendees found for this section or search query.")
-    else:
-        for idx, row in df_display.iterrows():
-            att_id = row["id"]
-            is_checked = (row["checked_in"] == "☑ YES")
-            has_waiver = (row["completed_waiver"] == "☑ YES")
-            is_bold_primary = (row["is_primary"] == 1)
+    tab_not_checked, tab_checked = st.tabs(["⏳ Pending Check-In", "✅ Checked In"])
 
-            # Styling container
-            bg_color = "#EEF9F1" if is_checked else "#FFFFFF"
-            border_color = "#16A34A" if is_checked else "#D0E1F0"
+    with tab_not_checked:
+        df_pending = df_display[df_display["checked_in"] != "☑ YES"]
+        if df_pending.empty:
+            st.info("No pending attendees in this section.")
+        else:
+            for idx, row in df_pending.iterrows():
+                render_attendee_card(row, tab_prefix="p")
 
-            with st.container():
-                c1, c2, c3, c4, c5 = st.columns([2.5, 2.5, 1.5, 1.5, 1.5])
-                
-                # Name Display
-                name_str = f"**{row['first_name']} {row['last_name']}**" if is_bold_primary else f"{row['first_name']} {row['last_name']}"
-                c1.markdown(f"{name_str}\n\n`<small>{row['email']}</small>`", unsafe_allow_html=True)
-                c2.markdown(f"**Ticket:** {row['ticket_type']}")
-
-                # Waiver Checkbox
-                waiver_toggle = c3.checkbox("Waiver", value=has_waiver, key=f"w_{att_id}")
-                if waiver_toggle != has_waiver:
-                    conn = get_db()
-                    new_val = "☑ YES" if waiver_toggle else "☐ NO"
-                    conn.execute("UPDATE attendees SET completed_waiver = ? WHERE id = ?", (new_val, att_id))
-                    conn.commit()
-                    conn.close()
-                    st.rerun()
-
-                # Check-In Checkbox
-                checkin_toggle = c4.checkbox("Check-In", value=is_checked, key=f"c_{att_id}")
-                if checkin_toggle != is_checked:
-                    conn = get_db()
-                    new_val = "☑ YES" if checkin_toggle else "☐ NO"
-                    now_time = datetime.datetime.now().strftime("%I:%M:%S %p") if checkin_toggle else ""
-                    conn.execute("UPDATE attendees SET checked_in = ?, time_checked_in = ? WHERE id = ?", (new_val, now_time, att_id))
-                    conn.commit()
-                    conn.close()
-                    st.rerun()
-
-                # Check Both Button
-                if c5.button("⚡ Both", key=f"b_{att_id}"):
-                    conn = get_db()
-                    now_time = datetime.datetime.now().strftime("%I:%M:%S %p")
-                    conn.execute("UPDATE attendees SET completed_waiver = '☑ YES', checked_in = '☑ YES', time_checked_in = ? WHERE id = ?", (now_time, att_id))
-                    conn.commit()
-                    conn.close()
-                    st.rerun()
-
-            st.divider()
+    with tab_checked:
+        df_done = df_display[df_display["checked_in"] == "☑ YES"]
+        if df_done.empty:
+            st.info("No checked-in attendees in this section yet.")
+        else:
+            for idx, row in df_done.iterrows():
+                render_attendee_card(row, tab_prefix="c")
 
 # =============================================================================
-# 6. MORNING ADMIN PORTAL & MASTER EXPORT
+# 7. MORNING ADMIN PORTAL & SECTION EXPORTS
 # =============================================================================
 elif app_mode == "Morning Admin Portal":
     st.subheader("🔑 Morning Admin Portal & Master File Management")
@@ -339,7 +372,18 @@ elif app_mode == "Morning Admin Portal":
         st.warning("Please enter the Admin Password in the sidebar to access management settings.")
     else:
         st.success("Admin Authenticated!")
-        
+
+        st.markdown("### 🗑️ System Reset")
+        if st.button("Clear All Database Records", type="secondary"):
+            conn = get_db()
+            conn.execute("DELETE FROM attendees")
+            conn.commit()
+            conn.close()
+            st.success("Database cleared! All records reset to 0.")
+            st.rerun()
+
+        st.divider()
+
         st.markdown("### 1. Pre-Load Morning Event Files")
         st.info("Upload your Eventbrite export and Waiver file here. This will populate the master check-in list for all volunteer phones.")
 
@@ -357,7 +401,8 @@ elif app_mode == "Morning Admin Portal":
                     df_imp = pd.read_csv(file_orders, sep="\t")
                 
                 populate_database(df_imp, s_names, s_emails)
-                st.success("Event database loaded successfully! Volunteer phones can now access the list via their assigned line links.")
+                st.success("Event database loaded successfully!")
+                st.rerun()
 
         st.divider()
 
@@ -383,22 +428,86 @@ elif app_mode == "Morning Admin Portal":
                     conn.commit()
                     conn.close()
                     st.success(f"Added walk-in registration for {w_first} {w_last}!")
+                    st.rerun()
 
         st.divider()
 
-        st.markdown("### 3. Master Roster Export")
-        st.info("Retrieve the final consolidated check-in list with all check-in timestamps and walk-in additions.")
+        st.markdown("### 3. Section-Specific Excel Exports")
+        st.info("Download individual Excel spreadsheets (.xlsx) for each volunteer station.")
 
         conn = get_db()
-        df_master = pd.read_sql_query("SELECT last_name AS [Last Name], first_name AS [First Name], email AS [Email], ticket_type AS [Ticket Type], completed_waiver AS [Signed Waiver?], checked_in AS [Checked In?], time_checked_in AS [Check-In Time] FROM attendees", conn)
+        
+        tab_sec1, tab_sec2, tab_sec3, tab_master = st.tabs([
+            "Line 1: Section A–I", 
+            "Line 2: Section J–R", 
+            "Line 3: Section S–Z", 
+            "All Attendees (Master)"
+        ])
+
+        def get_section_query(letters):
+            placeholders = ",".join(["?"] * len(letters))
+            q = f"""
+                SELECT 
+                    last_name AS [Last Name], 
+                    first_name AS [First Name], 
+                    email AS [Email], 
+                    ticket_type AS [Ticket Type], 
+                    completed_waiver AS [Signed Waiver?], 
+                    checked_in AS [Checked In?], 
+                    time_checked_in AS [Check-In Time],
+                    primary_name AS [Primary Signee]
+                FROM attendees 
+                WHERE UPPER(SUBSTR(last_name, 1, 1)) IN ({placeholders}) 
+                   OR UPPER(SUBSTR(primary_name, 1, 1)) IN ({placeholders})
+                ORDER BY primary_name ASC, is_primary DESC, id ASC
+            """
+            return pd.read_sql_query(q, conn, params=letters + letters)
+
+        with tab_sec1:
+            df_sec1 = get_section_query(LINE_GROUPS["A-I"])
+            st.dataframe(df_sec1, use_container_width=True)
+            excel_bytes1 = convert_df_to_excel(df_sec1)
+            st.download_button(
+                label="💾 Download Line 1 (A–I) Excel Roster (.xlsx)",
+                data=excel_bytes1,
+                file_name=f"IHOAE_Section_A-I_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
+
+        with tab_sec2:
+            df_sec2 = get_section_query(LINE_GROUPS["J-R"])
+            st.dataframe(df_sec2, use_container_width=True)
+            excel_bytes2 = convert_df_to_excel(df_sec2)
+            st.download_button(
+                label="💾 Download Line 2 (J–R) Excel Roster (.xlsx)",
+                data=excel_bytes2,
+                file_name=f"IHOAE_Section_J-R_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
+
+        with tab_sec3:
+            df_sec3 = get_section_query(LINE_GROUPS["S-Z"])
+            st.dataframe(df_sec3, use_container_width=True)
+            excel_bytes3 = convert_df_to_excel(df_sec3)
+            st.download_button(
+                label="💾 Download Line 3 (S–Z) Excel Roster (.xlsx)",
+                data=excel_bytes3,
+                file_name=f"IHOAE_Section_S-Z_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
+
+        with tab_master:
+            df_master = pd.read_sql_query("SELECT last_name AS [Last Name], first_name AS [First Name], email AS [Email], ticket_type AS [Ticket Type], completed_waiver AS [Signed Waiver?], checked_in AS [Checked In?], time_checked_in AS [Check-In Time], primary_name AS [Primary Signee] FROM attendees", conn)
+            st.dataframe(df_master, use_container_width=True)
+            excel_bytes_master = convert_df_to_excel(df_master)
+            st.download_button(
+                label="💾 Download Complete Master Excel Roster (.xlsx)",
+                data=excel_bytes_master,
+                file_name=f"IHOAE_Master_CheckIn_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
         conn.close()
-
-        st.dataframe(df_master, use_container_width=True)
-
-        csv_bytes = df_master.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="💾 Download Consolidated Master Check-In Roster (CSV)",
-            data=csv_bytes,
-            file_name=f"IHOAE_Master_CheckIn_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv"
-        )
