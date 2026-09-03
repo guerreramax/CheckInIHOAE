@@ -54,7 +54,7 @@ st.markdown("""
     .sub-header { font-size: 14px; font-style: italic; color: #FF6F43; margin-bottom: 15px; }
     .stButton button { border-radius: 6px; font-weight: bold; }
     div[data-testid="stMetricValue"] { font-size: 22px; color: #2E67AE; }
-    .email-text { font-size: 0.85em; color: #64748B; word-break: break-all; }
+    .email-text { font-size: 0.85em; color: #475569; word-break: break-all; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -208,7 +208,7 @@ def populate_database(df_imported, signed_names, signed_emails):
 url_line = st.query_params.get("line", "A-I")
 
 st.markdown('<p class="main-header">I ❤ OAKLAND ALAMEDA ESTUARY</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.3)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4)</p>', unsafe_allow_html=True)
 
 sidebar = st.sidebar
 sidebar.header("⚙️ Event Control Panel")
@@ -221,15 +221,40 @@ LINE_GROUPS = {
 }
 
 # =============================================================================
-# 5. CARD RENDERER FUNCTION
+# 5. CARD RENDERER FUNCTION WITH ALTERNATING GROUP COLORS
 # =============================================================================
-def render_attendee_card(row, tab_prefix):
+def render_attendee_card(row, tab_prefix, color_idx):
     att_id = row["id"]
     is_checked = (row["checked_in"] == "☑ YES")
     has_waiver = (row["completed_waiver"] == "☑ YES")
     is_bold_primary = (row["is_primary"] == 1)
 
-    with st.container():
+    # Color definitions: 0 = Soft Blue, 1 = Soft Orange
+    if color_idx == 0:
+        bg_color = "#E0F2FE"      # Soft Sky Blue
+        border_color = "#2563EB"  # Deep Blue
+    else:
+        bg_color = "#FFEDD5"      # Soft Peach / Orange
+        border_color = "#EA580C"  # Deep Orange
+
+    card_id = f"card_{att_id}_{tab_prefix}"
+
+    # Target specific container for custom group background color
+    st.markdown(f"""
+    <style>
+        div[data-testid="stContainer"]:has(#{card_id}), 
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(#{card_id}) {{
+            background-color: {bg_color} !important;
+            border-left: 6px solid {border_color} !important;
+            border-radius: 8px !important;
+            padding: 8px 12px !important;
+            margin-bottom: 8px !important;
+        }}
+    </style>
+    """, unsafe_allow_html=True)
+
+    with st.container(border=True):
+        st.markdown(f'<div id="{card_id}"></div>', unsafe_allow_html=True)
         c1, c2, c3, c4, c5 = st.columns([2.5, 2.5, 1.2, 1.2, 1.2])
         
         name_str = f"**{row['first_name']} {row['last_name']}**" if is_bold_primary else f"{row['first_name']} {row['last_name']}"
@@ -284,8 +309,6 @@ def render_attendee_card(row, tab_prefix):
                     conn.close()
                     st.success("Registrant details updated successfully!")
                     st.rerun()
-
-    st.divider()
 
 # =============================================================================
 # 6. VOLUNTEER CHECK-IN INTERFACE
@@ -350,16 +373,30 @@ if app_mode == "Volunteer Check-In Line":
         if df_pending.empty:
             st.info("No pending attendees in this section.")
         else:
+            current_group = None
+            color_toggle = 0
             for idx, row in df_pending.iterrows():
-                render_attendee_card(row, tab_prefix="p")
+                p_name = str(row["primary_name"]).strip().lower()
+                if p_name != current_group:
+                    if current_group is not None:
+                        color_toggle = 1 - color_toggle
+                    current_group = p_name
+                render_attendee_card(row, tab_prefix="p", color_idx=color_toggle)
 
     with tab_checked:
         df_done = df_display[df_display["checked_in"] == "☑ YES"]
         if df_done.empty:
             st.info("No checked-in attendees in this section yet.")
         else:
+            current_group = None
+            color_toggle = 0
             for idx, row in df_done.iterrows():
-                render_attendee_card(row, tab_prefix="c")
+                p_name = str(row["primary_name"]).strip().lower()
+                if p_name != current_group:
+                    if current_group is not None:
+                        color_toggle = 1 - color_toggle
+                    current_group = p_name
+                render_attendee_card(row, tab_prefix="c", color_idx=color_toggle)
 
 # =============================================================================
 # 7. MORNING ADMIN PORTAL & SECTION EXPORTS
