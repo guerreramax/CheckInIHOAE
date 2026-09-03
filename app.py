@@ -118,7 +118,7 @@ def format_display_group_name(raw_name):
 def convert_df_to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Section_CheckIn_Roster")
+        df.to_excel(writer, index=False, sheet_name="Completed_CheckIns")
     return output.getvalue()
 
 def parse_waivers(file_obj):
@@ -266,7 +266,7 @@ def populate_database(df_imported, signed_names, signed_emails):
 url_line = st.query_params.get("line", "A-I")
 
 st.markdown('<p class="main-header">I ❤ OAKLAND ALAMEDA ESTUARY</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.3)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.4)</p>', unsafe_allow_html=True)
 
 sidebar = st.sidebar
 sidebar.header("⚙️ Event Control Panel")
@@ -533,7 +533,7 @@ elif app_mode == "Morning Admin Portal":
         st.divider()
 
         st.markdown("### 3. Section-Specific Excel Exports")
-        st.info("Download individual Excel spreadsheets (.xlsx) for each volunteer station.")
+        st.info("Download individual Excel spreadsheets (.xlsx) containing attendees who have completed BOTH Waiver & Check-In.")
 
         conn = get_db()
         
@@ -557,8 +557,10 @@ elif app_mode == "Morning Admin Portal":
                     time_checked_in AS [Check-In Time],
                     primary_name AS [Primary Signee Key]
                 FROM attendees 
-                WHERE UPPER(SUBSTR(last_name, 1, 1)) IN ({placeholders}) 
-                   OR UPPER(SUBSTR(primary_name, 1, 1)) IN ({placeholders})
+                WHERE (UPPER(SUBSTR(last_name, 1, 1)) IN ({placeholders}) 
+                   OR UPPER(SUBSTR(primary_name, 1, 1)) IN ({placeholders}))
+                  AND completed_waiver = '☑ YES'
+                  AND checked_in = '☑ YES'
                 ORDER BY primary_name ASC, is_primary DESC, id ASC
             """
             return pd.read_sql_query(q, conn, params=letters + letters)
@@ -568,9 +570,9 @@ elif app_mode == "Morning Admin Portal":
             st.dataframe(df_sec1, use_container_width=True)
             excel_bytes1 = convert_df_to_excel(df_sec1)
             st.download_button(
-                label="💾 Download Line 1 (A–I) Excel Roster (.xlsx)",
+                label="💾 Download Line 1 (A–I) Completed Excel Roster (.xlsx)",
                 data=excel_bytes1,
-                file_name=f"IHOAE_Section_A-I_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                file_name=f"IHOAE_Section_A-I_CheckedIn_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary"
             )
@@ -580,9 +582,9 @@ elif app_mode == "Morning Admin Portal":
             st.dataframe(df_sec2, use_container_width=True)
             excel_bytes2 = convert_df_to_excel(df_sec2)
             st.download_button(
-                label="💾 Download Line 2 (J–R) Excel Roster (.xlsx)",
+                label="💾 Download Line 2 (J–R) Completed Excel Roster (.xlsx)",
                 data=excel_bytes2,
-                file_name=f"IHOAE_Section_J-R_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                file_name=f"IHOAE_Section_J-R_CheckedIn_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary"
             )
@@ -592,21 +594,35 @@ elif app_mode == "Morning Admin Portal":
             st.dataframe(df_sec3, use_container_width=True)
             excel_bytes3 = convert_df_to_excel(df_sec3)
             st.download_button(
-                label="💾 Download Line 3 (S–Z) Excel Roster (.xlsx)",
+                label="💾 Download Line 3 (S–Z) Completed Excel Roster (.xlsx)",
                 data=excel_bytes3,
-                file_name=f"IHOAE_Section_S-Z_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                file_name=f"IHOAE_Section_S-Z_CheckedIn_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary"
             )
 
         with tab_master:
-            df_master = pd.read_sql_query("SELECT last_name AS [Last Name], first_name AS [First Name], email AS [Email], ticket_type AS [Ticket Type], completed_waiver AS [Signed Waiver?], checked_in AS [Checked In?], time_checked_in AS [Check-In Time], primary_name AS [Primary Signee Key] FROM attendees", conn)
+            df_master = pd.read_sql_query("""
+                SELECT 
+                    last_name AS [Last Name], 
+                    first_name AS [First Name], 
+                    email AS [Email], 
+                    ticket_type AS [Ticket Type], 
+                    completed_waiver AS [Signed Waiver?], 
+                    checked_in AS [Checked In?], 
+                    time_checked_in AS [Check-In Time], 
+                    primary_name AS [Primary Signee Key] 
+                FROM attendees 
+                WHERE completed_waiver = '☑ YES' 
+                  AND checked_in = '☑ YES'
+                ORDER BY primary_name ASC, is_primary DESC, id ASC
+            """, conn)
             st.dataframe(df_master, use_container_width=True)
             excel_bytes_master = convert_df_to_excel(df_master)
             st.download_button(
-                label="💾 Download Complete Master Excel Roster (.xlsx)",
+                label="💾 Download Complete Master Completed Excel Roster (.xlsx)",
                 data=excel_bytes_master,
-                file_name=f"IHOAE_Master_CheckIn_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                file_name=f"IHOAE_Master_CheckedIn_Export_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
