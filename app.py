@@ -254,7 +254,7 @@ def populate_database(df_imported, signed_names, signed_emails):
 url_line = st.query_params.get("line", "A-I")
 
 st.markdown('<p class="main-header">I ❤ OAKLAND ALAMEDA ESTUARY</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.1)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.2)</p>', unsafe_allow_html=True)
 
 sidebar = st.sidebar
 sidebar.header("⚙️ Event Control Panel")
@@ -356,6 +356,15 @@ if app_mode == "Volunteer Check-In Line":
             st.toast(f"✅ Line {selected_line} progress synced & saved!", icon="💾")
 
     conn = get_db()
+    
+    # Pre-calculate party sizes across entire DB
+    counts_df = pd.read_sql_query("""
+        SELECT LOWER(TRIM(primary_name)) as g_key, COUNT(*) as party_size 
+        FROM attendees 
+        GROUP BY LOWER(TRIM(primary_name))
+    """, conn)
+    party_sizes = dict(zip(counts_df['g_key'], counts_df['party_size']))
+
     query = "SELECT id, last_name, first_name, email, ticket_type, completed_waiver, checked_in, time_checked_in, primary_name, is_primary FROM attendees"
     params = []
     conditions = []
@@ -400,14 +409,19 @@ if app_mode == "Volunteer Check-In Line":
             current_group = None
             color_toggle = 0
             for idx, row in df_pending.iterrows():
-                p_name = str(row["primary_name"]).strip().lower()
-                if p_name != current_group:
+                p_name_raw = str(row["primary_name"]).strip() if row["primary_name"] else f"{row['first_name']} {row['last_name']}".strip()
+                g_key = p_name_raw.lower()
+                party_size = party_sizes.get(g_key, 1)
+
+                if g_key != current_group:
                     if current_group is not None:
                         color_toggle = 1 - color_toggle
-                    current_group = p_name
-                    banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
-                    banner_label = row["primary_name"] if row["primary_name"] else f"{row['first_name']} {row['last_name']}"
-                    st.markdown(f'<span class="{banner_style}">Group: {banner_label}</span>', unsafe_allow_html=True)
+                    current_group = g_key
+                    
+                    # Only show Group banner if party size is 2 or more (+1 or more)
+                    if party_size > 1:
+                        banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
+                        st.markdown(f'<span class="{banner_style}">Group: {p_name_raw} ({party_size} People)</span>', unsafe_allow_html=True)
 
                 render_attendee_card(row, tab_prefix="p", color_idx=color_toggle)
 
@@ -419,14 +433,19 @@ if app_mode == "Volunteer Check-In Line":
             current_group = None
             color_toggle = 0
             for idx, row in df_done.iterrows():
-                p_name = str(row["primary_name"]).strip().lower()
-                if p_name != current_group:
+                p_name_raw = str(row["primary_name"]).strip() if row["primary_name"] else f"{row['first_name']} {row['last_name']}".strip()
+                g_key = p_name_raw.lower()
+                party_size = party_sizes.get(g_key, 1)
+
+                if g_key != current_group:
                     if current_group is not None:
                         color_toggle = 1 - color_toggle
-                    current_group = p_name
-                    banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
-                    banner_label = row["primary_name"] if row["primary_name"] else f"{row['first_name']} {row['last_name']}"
-                    st.markdown(f'<span class="{banner_style}">Group: {banner_label}</span>', unsafe_allow_html=True)
+                    current_group = g_key
+                    
+                    # Only show Group banner if party size is 2 or more (+1 or more)
+                    if party_size > 1:
+                        banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
+                        st.markdown(f'<span class="{banner_style}">Group: {p_name_raw} ({party_size} People)</span>', unsafe_allow_html=True)
 
                 render_attendee_card(row, tab_prefix="c", color_idx=color_toggle)
 
