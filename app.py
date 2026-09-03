@@ -55,6 +55,52 @@ st.markdown("""
     .stButton button { border-radius: 6px; font-weight: bold; }
     div[data-testid="stMetricValue"] { font-size: 22px; color: #2E67AE; }
     .email-text { font-size: 0.85em; color: #475569; word-break: break-all; }
+
+    /* Group Color 0: Soft Sky Blue Container */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.group-marker-blue),
+    div[data-testid="stBlock"]:has(.group-marker-blue),
+    div[data-testid="element-container"]:has(.group-marker-blue) {
+        background-color: #E0F2FE !important;
+        border-left: 6px solid #0284C7 !important;
+        border-radius: 8px !important;
+        padding: 4px 8px !important;
+        margin-bottom: 6px !important;
+    }
+
+    /* Group Color 1: Soft Peach / Orange Container */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.group-marker-orange),
+    div[data-testid="stBlock"]:has(.group-marker-orange),
+    div[data-testid="element-container"]:has(.group-marker-orange) {
+        background-color: #FFEDD5 !important;
+        border-left: 6px solid #EA580C !important;
+        border-radius: 8px !important;
+        padding: 4px 8px !important;
+        margin-bottom: 6px !important;
+    }
+
+    /* Group Banner Badges */
+    .banner-blue {
+        background-color: #0284C7;
+        color: #FFFFFF;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 0.82em;
+        font-weight: bold;
+        display: inline-block;
+        margin-top: 10px;
+        margin-bottom: 4px;
+    }
+    .banner-orange {
+        background-color: #EA580C;
+        color: #FFFFFF;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 0.82em;
+        font-weight: bold;
+        display: inline-block;
+        margin-top: 10px;
+        margin-bottom: 4px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -208,7 +254,7 @@ def populate_database(df_imported, signed_names, signed_emails):
 url_line = st.query_params.get("line", "A-I")
 
 st.markdown('<p class="main-header">I ❤ OAKLAND ALAMEDA ESTUARY</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.1)</p>', unsafe_allow_html=True)
 
 sidebar = st.sidebar
 sidebar.header("⚙️ Event Control Panel")
@@ -221,7 +267,7 @@ LINE_GROUPS = {
 }
 
 # =============================================================================
-# 5. CARD RENDERER FUNCTION WITH ALTERNATING GROUP COLORS
+# 5. CARD RENDERER FUNCTION WITH CLASS MARKERS
 # =============================================================================
 def render_attendee_card(row, tab_prefix, color_idx):
     att_id = row["id"]
@@ -229,32 +275,10 @@ def render_attendee_card(row, tab_prefix, color_idx):
     has_waiver = (row["completed_waiver"] == "☑ YES")
     is_bold_primary = (row["is_primary"] == 1)
 
-    # Color definitions: 0 = Soft Blue, 1 = Soft Orange
-    if color_idx == 0:
-        bg_color = "#E0F2FE"      # Soft Sky Blue
-        border_color = "#2563EB"  # Deep Blue
-    else:
-        bg_color = "#FFEDD5"      # Soft Peach / Orange
-        border_color = "#EA580C"  # Deep Orange
-
-    card_id = f"card_{att_id}_{tab_prefix}"
-
-    # Target specific container for custom group background color
-    st.markdown(f"""
-    <style>
-        div[data-testid="stContainer"]:has(#{card_id}), 
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(#{card_id}) {{
-            background-color: {bg_color} !important;
-            border-left: 6px solid {border_color} !important;
-            border-radius: 8px !important;
-            padding: 8px 12px !important;
-            margin-bottom: 8px !important;
-        }}
-    </style>
-    """, unsafe_allow_html=True)
+    marker_class = "group-marker-blue" if color_idx == 0 else "group-marker-orange"
 
     with st.container(border=True):
-        st.markdown(f'<div id="{card_id}"></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="{marker_class}"></div>', unsafe_allow_html=True)
         c1, c2, c3, c4, c5 = st.columns([2.5, 2.5, 1.2, 1.2, 1.2])
         
         name_str = f"**{row['first_name']} {row['last_name']}**" if is_bold_primary else f"{row['first_name']} {row['last_name']}"
@@ -381,6 +405,10 @@ if app_mode == "Volunteer Check-In Line":
                     if current_group is not None:
                         color_toggle = 1 - color_toggle
                     current_group = p_name
+                    banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
+                    banner_label = row["primary_name"] if row["primary_name"] else f"{row['first_name']} {row['last_name']}"
+                    st.markdown(f'<span class="{banner_style}">Group: {banner_label}</span>', unsafe_allow_html=True)
+
                 render_attendee_card(row, tab_prefix="p", color_idx=color_toggle)
 
     with tab_checked:
@@ -396,6 +424,10 @@ if app_mode == "Volunteer Check-In Line":
                     if current_group is not None:
                         color_toggle = 1 - color_toggle
                     current_group = p_name
+                    banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
+                    banner_label = row["primary_name"] if row["primary_name"] else f"{row['first_name']} {row['last_name']}"
+                    st.markdown(f'<span class="{banner_style}">Group: {banner_label}</span>', unsafe_allow_html=True)
+
                 render_attendee_card(row, tab_prefix="c", color_idx=color_toggle)
 
 # =============================================================================
