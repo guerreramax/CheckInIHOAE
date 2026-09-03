@@ -107,6 +107,14 @@ st.markdown("""
 # =============================================================================
 # 3. HELPER FUNCTIONS & EXCEL CONVERTER
 # =============================================================================
+def format_display_group_name(raw_name):
+    if not raw_name:
+        return ""
+    if "," in raw_name:
+        parts = raw_name.split(",", 1)
+        return f"{parts[1].strip()} {parts[0].strip()}"
+    return raw_name.strip()
+
 def convert_df_to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -177,7 +185,9 @@ def populate_database(df_imported, signed_names, signed_emails):
                 c_in = str(r[checkin_col]).strip() if checkin_col and pd.notna(r[checkin_col]) else "☐ NO"
                 t_in = str(r[time_col]).strip() if time_col and pd.notna(r[time_col]) else ""
 
-                buyer_full = f"{b_first} {b_last}".strip()
+                buyer_full_display = f"{b_first} {b_last}".strip()
+                primary_group_key = f"{b_last}, {b_first}".strip(", ") if b_last else buyer_full_display
+
                 is_primary = 1 if (i == 0 and is_multi) else 0
                 is_guest = 1 if i > 0 else 0
 
@@ -185,7 +195,7 @@ def populate_database(df_imported, signed_names, signed_emails):
                     f_name, l_name = b_first, b_last
                 elif i > 0 and ((f_name.lower() == b_first.lower() and l_name.lower() == b_last.lower()) or (not f_name and not l_name)):
                     f_name = f"Guest {i}"
-                    l_name = f"({buyer_full})" if buyer_full else ""
+                    l_name = f"({buyer_full_display})" if buyer_full_display else ""
 
                 c_in_clean = "☑ YES" if c_in.upper() in ["YES", "Y", "TRUE", "1.0", "1", "CHECKED", "☑ YES", "☑", "✓ YES", "✓"] else "☐ NO"
 
@@ -194,7 +204,7 @@ def populate_database(df_imported, signed_names, signed_emails):
                 if e_mail.lower() in signed_emails or full1 in signed_names or full2 in signed_names:
                     has_waiver = "☑ YES"
 
-                rows.append((l_name, f_name, e_mail, t_desc, has_waiver, c_in_clean, t_in, buyer_full, is_primary, is_guest))
+                rows.append((l_name, f_name, e_mail, t_desc, has_waiver, c_in_clean, t_in, primary_group_key, is_primary, is_guest))
     else:
         for orig_idx, r in df_imported.iterrows():
             f_name = str(r[first_col]).strip() if first_col and pd.notna(r[first_col]) else ""
@@ -227,17 +237,19 @@ def populate_database(df_imported, signed_names, signed_emails):
                     qty = 1
 
             c_in_clean = "☑ YES" if c_in.upper() in ["YES", "Y", "TRUE", "1.0", "1", "CHECKED", "☑ YES", "☑", "✓ YES", "✓"] else "☐ NO"
-            buyer_full = f"{f_name} {l_name}".strip()
+            buyer_full_display = f"{f_name} {l_name}".strip()
+            primary_group_key = f"{l_name}, {f_name}".strip(", ") if l_name else buyer_full_display
 
             full1, full2 = f_name.lower() + " " + l_name.lower(), l_name.lower() + " " + f_name.lower()
             has_waiver = "☐ NO"
             if e_mail.lower() in signed_emails or full1 in signed_names or full2 in signed_names:
                 has_waiver = "☑ YES"
 
-            rows.append((l_name, f_name, e_mail, t_desc, has_waiver, c_in_clean, t_in, buyer_full, 1 if qty > 1 else 0, 0))
+            rows.append((l_name, f_name, e_mail, t_desc, has_waiver, c_in_clean, t_in, primary_group_key, 1 if qty > 1 else 0, 0))
 
             for g in range(1, qty):
-                rows.append((f"({buyer_full})" if buyer_full else "", f"Guest {g}", e_mail, t_desc, "☐ NO", "☐ NO", "", buyer_full, 0, 1))
+                guest_l_name = f"{l_name} (Guest {g})" if l_name else f"Guest {g}"
+                rows.append((guest_l_name, f"Guest {g}", e_mail, t_desc, "☐ NO", "☐ NO", "", primary_group_key, 0, 1))
 
     conn = get_db()
     conn.execute("DELETE FROM attendees")
@@ -254,7 +266,7 @@ def populate_database(df_imported, signed_names, signed_emails):
 url_line = st.query_params.get("line", "A-I")
 
 st.markdown('<p class="main-header">I ❤ OAKLAND ALAMEDA ESTUARY</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.2)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Official Event Check-In & Waiver Management System (v6.4.3)</p>', unsafe_allow_html=True)
 
 sidebar = st.sidebar
 sidebar.header("⚙️ Event Control Panel")
@@ -357,7 +369,6 @@ if app_mode == "Volunteer Check-In Line":
 
     conn = get_db()
     
-    # Pre-calculate party sizes across entire DB
     counts_df = pd.read_sql_query("""
         SELECT LOWER(TRIM(primary_name)) as g_key, COUNT(*) as party_size 
         FROM attendees 
@@ -409,8 +420,8 @@ if app_mode == "Volunteer Check-In Line":
             current_group = None
             color_toggle = 0
             for idx, row in df_pending.iterrows():
-                p_name_raw = str(row["primary_name"]).strip() if row["primary_name"] else f"{row['first_name']} {row['last_name']}".strip()
-                g_key = p_name_raw.lower()
+                p_raw = str(row["primary_name"]).strip() if row["primary_name"] else f"{row['last_name']}, {row['first_name']}".strip(", ")
+                g_key = p_raw.lower()
                 party_size = party_sizes.get(g_key, 1)
 
                 if g_key != current_group:
@@ -418,10 +429,10 @@ if app_mode == "Volunteer Check-In Line":
                         color_toggle = 1 - color_toggle
                     current_group = g_key
                     
-                    # Only show Group banner if party size is 2 or more (+1 or more)
                     if party_size > 1:
                         banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
-                        st.markdown(f'<span class="{banner_style}">Group: {p_name_raw} ({party_size} People)</span>', unsafe_allow_html=True)
+                        disp_name = format_display_group_name(p_raw)
+                        st.markdown(f'<span class="{banner_style}">Group: {disp_name} ({party_size} People)</span>', unsafe_allow_html=True)
 
                 render_attendee_card(row, tab_prefix="p", color_idx=color_toggle)
 
@@ -433,8 +444,8 @@ if app_mode == "Volunteer Check-In Line":
             current_group = None
             color_toggle = 0
             for idx, row in df_done.iterrows():
-                p_name_raw = str(row["primary_name"]).strip() if row["primary_name"] else f"{row['first_name']} {row['last_name']}".strip()
-                g_key = p_name_raw.lower()
+                p_raw = str(row["primary_name"]).strip() if row["primary_name"] else f"{row['last_name']}, {row['first_name']}".strip(", ")
+                g_key = p_raw.lower()
                 party_size = party_sizes.get(g_key, 1)
 
                 if g_key != current_group:
@@ -442,10 +453,10 @@ if app_mode == "Volunteer Check-In Line":
                         color_toggle = 1 - color_toggle
                     current_group = g_key
                     
-                    # Only show Group banner if party size is 2 or more (+1 or more)
                     if party_size > 1:
                         banner_style = "banner-blue" if color_toggle == 0 else "banner-orange"
-                        st.markdown(f'<span class="{banner_style}">Group: {p_name_raw} ({party_size} People)</span>', unsafe_allow_html=True)
+                        disp_name = format_display_group_name(p_raw)
+                        st.markdown(f'<span class="{banner_style}">Group: {disp_name} ({party_size} People)</span>', unsafe_allow_html=True)
 
                 render_attendee_card(row, tab_prefix="c", color_idx=color_toggle)
 
@@ -509,10 +520,11 @@ elif app_mode == "Morning Admin Portal":
                 else:
                     now_str = datetime.datetime.now().strftime("%I:%M:%S %p") if w_checkin and w_waiver else ""
                     conn = get_db()
+                    p_key = f"{w_last}, {w_first}".strip(", ")
                     conn.execute("""
                         INSERT INTO attendees (last_name, first_name, email, ticket_type, completed_waiver, checked_in, time_checked_in, primary_name, is_primary, is_guest)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
-                    """, (w_last, w_first, w_email, w_ticket, "☑ YES" if w_waiver else "☐ NO", "☑ YES" if w_checkin else "☐ NO", now_str, f"{w_first} {w_last}".strip()))
+                    """, (w_last, w_first, w_email, w_ticket, "☑ YES" if w_waiver else "☐ NO", "☑ YES" if w_checkin else "☐ NO", now_str, p_key))
                     conn.commit()
                     conn.close()
                     st.success(f"Added walk-in registration for {w_first} {w_last}!")
@@ -543,7 +555,7 @@ elif app_mode == "Morning Admin Portal":
                     completed_waiver AS [Signed Waiver?], 
                     checked_in AS [Checked In?], 
                     time_checked_in AS [Check-In Time],
-                    primary_name AS [Primary Signee]
+                    primary_name AS [Primary Signee Key]
                 FROM attendees 
                 WHERE UPPER(SUBSTR(last_name, 1, 1)) IN ({placeholders}) 
                    OR UPPER(SUBSTR(primary_name, 1, 1)) IN ({placeholders})
@@ -588,7 +600,7 @@ elif app_mode == "Morning Admin Portal":
             )
 
         with tab_master:
-            df_master = pd.read_sql_query("SELECT last_name AS [Last Name], first_name AS [First Name], email AS [Email], ticket_type AS [Ticket Type], completed_waiver AS [Signed Waiver?], checked_in AS [Checked In?], time_checked_in AS [Check-In Time], primary_name AS [Primary Signee] FROM attendees", conn)
+            df_master = pd.read_sql_query("SELECT last_name AS [Last Name], first_name AS [First Name], email AS [Email], ticket_type AS [Ticket Type], completed_waiver AS [Signed Waiver?], checked_in AS [Checked In?], time_checked_in AS [Check-In Time], primary_name AS [Primary Signee Key] FROM attendees", conn)
             st.dataframe(df_master, use_container_width=True)
             excel_bytes_master = convert_df_to_excel(df_master)
             st.download_button(
